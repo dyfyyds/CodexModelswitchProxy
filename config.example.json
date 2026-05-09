@@ -1,0 +1,21 @@
+{
+  "port": 8080,
+  "host": "127.0.0.1",
+  "requireProxyKeyEnv": "",
+  "defaultModel": "deepseek",
+  "allowDirectModels": false,
+  "defaultProvider": "deepseek",
+  "providers": {
+    "deepseek": {
+      "baseUrl": "https://api.deepseek.com/v1",
+      "protocol": "chat",
+      "apiKeyEnv": "DEEPSEEK_API_KEY"
+    }
+  },
+  "models": {
+    "deepseek": {
+      "provider": "deepseek",
+      "upstreamModel": "deepseek-v4-pro"
+    }
+  }
+}

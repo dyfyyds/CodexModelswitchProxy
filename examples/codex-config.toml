@@ -1,0 +1,18 @@
+model_provider = "switch-proxy"
+model = "deepseek-coder"
+
+[model_providers.switch-proxy]
+name = "Local Model Switch Proxy"
+base_url = "http://127.0.0.1:8080/v1"
+
+[profiles.deepseek]
+model_provider = "switch-proxy"
+model = "deepseek-coder"
+
+[profiles.openrouter-qwen]
+model_provider = "switch-proxy"
+model = "qwen-coder"
+
+[profiles.local]
+model_provider = "switch-proxy"
+model = "local-coder"

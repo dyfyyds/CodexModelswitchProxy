@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Codex Model Switch Proxy</title>
+    <link rel="stylesheet" href="/app/styles.css" />
+  </head>
+  <body>
+    <div id="toast" class="toast"></div>
+
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <h1>Codex Model Switch Proxy</h1>
+          <p id="configPath">正在读取配置...</p>
+        </div>
+        <div class="topRight">
+          <div class="status">
+            <span id="statusDot" class="dot"></span>
+            <span id="statusText">连接中</span>
+          </div>
+          <button id="themeToggle" class="icon-btn" type="button" title="切换主题">
+            <span id="themeIcon">&#9789;</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Provider + Model management -->
+      <section class="panel">
+        <div class="panelHead">
+          <div>
+            <h2>供应商与模型 <span id="providerCount" class="badge">0</span></h2>
+            <p>每个供应商下管理对应的模型，点击展开查看详情。</p>
+          </div>
+          <div class="panelHeadBtns">
+            <button id="addProviderBtn" class="ghost" type="button">+ 添加供应商</button>
+            <button id="refreshBtn" class="ghost" type="button">刷新</button>
+          </div>
+        </div>
+
+        <div id="providerList" class="provider-list"></div>
+
+        <!-- Provider form (collapsed by default) -->
+        <div id="providerFormWrap" class="collapsible-form hidden">
+          <form id="providerForm">
+            <h3 class="form-title" id="formTitle">添加供应商</h3>
+            <div class="formGrid">
+              <div class="group">
+                <h3>基本信息</h3>
+                <label>
+                  <span>Provider ID</span>
+                  <input id="pId" autocomplete="off" placeholder="deepseek" required />
+                </label>
+                <label>
+                  <span>Base URL</span>
+                  <input id="pBaseUrl" autocomplete="off" placeholder="https://api.deepseek.com/v1" required />
+                </label>
+              </div>
+              <div class="group">
+                <h3>连接配置</h3>
+                <label>
+                  <span>协议</span>
+                  <select id="pProtocol">
+                    <option value="chat">chat</option>
+                    <option value="responses">responses</option>
+                  </select>
+                </label>
+                <label>
+                  <span>API Key 环境变量</span>
+                  <input id="pApiKeyEnv" autocomplete="off" placeholder="DEEPSEEK_API_KEY" />
+                </label>
+                <label>
+                  <span>API Key 值 <small class="muted">(写入 .env)</small></span>
+                  <div class="keyInput">
+                    <input id="pApiKey" type="password" autocomplete="off" placeholder="sk-..." />
+                    <button id="toggleProviderKey" class="ghost" type="button" title="显示/隐藏">&#128065;</button>
+                  </div>
+                </label>
+              </div>
+              <div class="group full">
+                <h3>额外请求头 <small class="muted">(可选)</small></h3>
+                <textarea id="pHeaders" spellcheck="false" rows="2" placeholder='{"X-Title":"Codex Proxy"}'></textarea>
+              </div>
+            </div>
+
+            <!-- Models under this provider -->
+            <div class="models-section">
+              <div class="models-header">
+                <h3>模型列表</h3>
+                <button type="button" id="addModelRow" class="ghost small">+ 添加模型</button>
+              </div>
+              <div class="model-rows-wrap">
+                <div class="model-row-head">
+                  <span>模型别名</span>
+                  <span>上游模型名</span>
+                  <span></span>
+                </div>
+                <div id="modelRows" class="model-rows"></div>
+              </div>
+            </div>
+
+            <div class="actions">
+              <div class="hint">保存后会同时更新供应商配置和所有模型映射。</div>
+              <button type="button" id="cancelProviderBtn" class="ghost">取消</button>
+              <button type="submit">保存</button>
+            </div>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app/app.js" type="module"></script>
+  </body>
+</html>

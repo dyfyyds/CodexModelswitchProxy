@@ -1,4 +1,4 @@
-const state = { config: null, envKeys: {}, editingProvider: null };
+const state = { config: null, envKeys: {}, editingProvider: null, statsRange: "all" };
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -26,6 +26,14 @@ const el = {
   pHeaders: $("#pHeaders"),
   addModelRow: $("#addModelRow"),
   modelRows: $("#modelRows"),
+  refreshStatsBtn: $("#refreshStatsBtn"),
+  rangeTabs: $("#rangeTabs"),
+  statTotal: $("#statTotal"),
+  statSuccessRate: $("#statSuccessRate"),
+  statAvgLatency: $("#statAvgLatency"),
+  statFailCount: $("#statFailCount"),
+  statsByModel: $("#statsByModel"),
+  statsByProvider: $("#statsByProvider"),
 };
 
 // ── Theme ──
@@ -106,6 +114,17 @@ el.addModelRow.addEventListener("click", () => addModelRow());
 
 el.refreshBtn.addEventListener("click", loadConfig);
 
+el.refreshStatsBtn.addEventListener("click", loadStats);
+
+for (const tab of el.rangeTabs.querySelectorAll(".range-tab")) {
+  tab.addEventListener("click", () => {
+    for (const t of el.rangeTabs.querySelectorAll(".range-tab")) t.classList.remove("active");
+    tab.classList.add("active");
+    state.statsRange = tab.dataset.range;
+    loadStats();
+  });
+}
+
 function showForm(wrap) {
   wrap.classList.remove("hidden");
   wrap.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -116,7 +135,11 @@ function hideForm(wrap) {
 }
 
 // ── Load ──
-await loadConfig();
+await Promise.all([loadConfig(), loadStats()]);
+
+// Live stats via SSE — only refreshes when a request actually happens
+const statsSSE = new EventSource("/admin/stats/stream");
+statsSSE.onmessage = () => loadStats();
 
 async function loadConfig() {
   setStatus("连接中", "pending");
@@ -132,6 +155,15 @@ async function loadConfig() {
   } catch (err) {
     setStatus(err.message, "bad");
     toast("连接失败: " + err.message, "bad");
+  }
+}
+
+async function loadStats() {
+  try {
+    const stats = await requestJson(`/admin/stats?range=${state.statsRange}`);
+    renderStats(stats);
+  } catch {
+    // stats endpoint may fail silently
   }
 }
 
@@ -347,6 +379,60 @@ function renderProviders(config) {
   for (const btn of el.providerList.querySelectorAll("[data-delete]")) {
     btn.addEventListener("click", () => deleteProvider(btn.dataset.delete));
   }
+}
+
+// ── Stats ──
+function formatLatency(ms) {
+  if (ms >= 60000) return (ms / 60000).toFixed(1) + " min";
+  if (ms >= 1000) return (ms / 1000).toFixed(2) + " s";
+  return ms + " ms";
+}
+
+function renderStats(stats) {
+  const { overall, byModel, byProvider } = stats;
+
+  el.statTotal.textContent = overall.total.toLocaleString();
+  el.statSuccessRate.textContent = overall.total > 0
+    ? ((overall.success / overall.total) * 100).toFixed(1) + "%"
+    : "-";
+  el.statAvgLatency.textContent = overall.total > 0
+    ? formatLatency(overall.avgLatency)
+    : "-";
+  el.statFailCount.textContent = overall.fail.toLocaleString();
+
+  el.statsByModel.innerHTML = renderStatsTable(byModel, ["模型", "调用次数", "成功率", "平均耗时", "最近使用"]);
+  el.statsByProvider.innerHTML = renderStatsTable(byProvider, ["供应商", "调用次数", "成功率", "平均耗时"]);
+}
+
+function renderStatsTable(data, headers) {
+  const entries = Object.entries(data);
+  if (entries.length === 0) {
+    return '<div class="stats-empty">暂无数据，发起代理请求后将自动记录。</div>';
+  }
+
+  const hasLastUsed = headers.length === 5;
+  const ths = headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("");
+
+  const rows = entries
+    .sort(([, a], [, b]) => b.total - a.total)
+    .map(([name, s]) => {
+      const rate = s.total > 0 ? ((s.success / s.total) * 100) : 0;
+      const rateClass = rate >= 95 ? "rate-high" : rate < 80 ? "rate-low" : "";
+      const lastUsed = hasLastUsed && s.lastUsed
+        ? new Date(s.lastUsed).toLocaleString("zh-CN", { hour12: false, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+        : "";
+
+      return `<tr>
+        <td>${escapeHtml(name)}</td>
+        <td>${s.total.toLocaleString()}</td>
+        <td class="${rateClass}">${rate.toFixed(1)}%</td>
+        <td>${formatLatency(s.avgLatency)}</td>
+        ${hasLastUsed ? `<td>${lastUsed}</td>` : ""}
+      </tr>`;
+    })
+    .join("");
+
+  return `<table class="stats-table"><thead><tr>${ths}</tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 // ── Utils ──

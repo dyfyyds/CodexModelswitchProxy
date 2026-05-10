@@ -26,6 +26,56 @@
         </div>
       </header>
 
+      <!-- Request Statistics -->
+      <section class="panel" id="statsPanel">
+        <div class="panelHead">
+          <div>
+            <h2>请求统计</h2>
+            <p>代理请求的调用次数、成功率和平均耗时。</p>
+          </div>
+          <div class="panelHeadBtns">
+            <div class="range-tabs" id="rangeTabs">
+              <button class="range-tab active" data-range="all">全部</button>
+              <button class="range-tab" data-range="month">一个月</button>
+              <button class="range-tab" data-range="week">一周</button>
+              <button class="range-tab" data-range="day">一天</button>
+            </div>
+            <button id="refreshStatsBtn" class="ghost" type="button">刷新</button>
+          </div>
+        </div>
+
+        <div id="statsContent" class="stats-content">
+          <div class="stats-overview">
+            <div class="stat-card">
+              <div class="stat-label">调用次数</div>
+              <div class="stat-value" id="statTotal">-</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">成功率</div>
+              <div class="stat-value" id="statSuccessRate">-</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">平均耗时</div>
+              <div class="stat-value" id="statAvgLatency">-</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">失败次数</div>
+              <div class="stat-value" id="statFailCount">-</div>
+            </div>
+          </div>
+
+          <div class="stats-table-section">
+            <h3>按模型统计</h3>
+            <div id="statsByModel" class="stats-table-wrap"></div>
+          </div>
+
+          <div class="stats-table-section">
+            <h3>按供应商统计</h3>
+            <div id="statsByProvider" class="stats-table-wrap"></div>
+          </div>
+        </div>
+      </section>
+
       <!-- Provider + Model management -->
       <section class="panel">
         <div class="panelHead">

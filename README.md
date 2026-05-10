@@ -152,10 +152,11 @@ Codex → http://127.0.0.1:8080/v1/responses
 - `GET /v1/models` — 列出所有可用模型
 - `POST /v1/responses` — Responses API 代理
 - `POST /v1/chat/completions` — Chat Completions API 代理
+- `GET /admin/stats` — 请求统计（调用次数、成功率、平均耗时）
 - 按 model 字段切换不同上游供应商
 - Responses ↔ Chat Completions 协议互转
 - 流式输出支持（SSE）
-- Web 管理页面
+- Web 管理页面（含请求统计面板）
 - 不依赖第三方 npm 包，Node.js 原生运行
 
 ## Codex 配置
@@ -263,7 +264,7 @@ API Key 未配置。检查 `.env` 中是否填写了对应 Key，`apiKeyEnv` 是
 
 - [ ] 支持供应商级别的请求速率限制和重试机制
 - [ ] 添加请求日志记录（记录每次转发的模型、供应商、耗时、状态码）
-- [ ] 管理页面添加请求统计面板（调用次数、成功率、平均耗时）
+- [x] 管理页面添加请求统计面板（调用次数、成功率、平均耗时）
 - [ ] 支持模型别名分组（按用途分组，如"编程"、"推理"、"对话"）
 - [ ] 添加 Docker 部署支持（Dockerfile + docker-compose）
 - [ ] 支持配置热更新（修改 config.local.json 后无需重启）

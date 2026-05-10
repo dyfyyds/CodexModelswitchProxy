@@ -59,6 +59,110 @@ const PROVIDER_PRESETS = {
   }
 };
 
+// ── Request Stats Tracker (persistent) ──
+const STATS_FILE = resolve(process.cwd(), "stats.json");
+const MAX_STATS_ENTRIES = 100000;
+let requestStats = [];
+let statsDirty = false;
+
+// SSE clients for live stats push
+const statsClients = new Set();
+
+function notifyStatsClients() {
+  const data = `data: ${JSON.stringify({ total: requestStats.length })}\n\n`;
+  for (const client of statsClients) {
+    try { client.write(data); } catch { statsClients.delete(client); }
+  }
+}
+
+function loadStatsFile() {
+  try {
+    if (existsSync(STATS_FILE)) {
+      requestStats = JSON.parse(readFileSync(STATS_FILE, "utf8"));
+      if (!Array.isArray(requestStats)) requestStats = [];
+    }
+  } catch {
+    requestStats = [];
+  }
+}
+
+function flushStats() {
+  if (!statsDirty) return;
+  try {
+    writeFileSync(STATS_FILE, JSON.stringify(requestStats), "utf8");
+    statsDirty = false;
+  } catch { /* ignore write errors */ }
+}
+
+// Flush every 30s
+const statsFlushTimer = setInterval(flushStats, 30000);
+statsFlushTimer.unref();
+
+// Flush on exit
+process.on("SIGINT", () => { flushStats(); process.exit(0); });
+process.on("SIGTERM", () => { flushStats(); process.exit(0); });
+
+loadStatsFile();
+
+function recordStat(entry) {
+  requestStats.push(entry);
+  statsDirty = true;
+  if (requestStats.length > MAX_STATS_ENTRIES) {
+    requestStats.splice(0, requestStats.length - MAX_STATS_ENTRIES);
+  }
+  notifyStatsClients();
+}
+
+const RANGE_MS = { day: 86400000, week: 604800000, month: 2592000000 };
+
+function getStats(range = "all") {
+  const now = Date.now();
+  const cutoff = range !== "all" && RANGE_MS[range] ? now - RANGE_MS[range] : 0;
+
+  const overall = { total: 0, success: 0, fail: 0, totalLatency: 0 };
+  const byModel = {};
+  const byProvider = {};
+
+  for (const s of requestStats) {
+    if (s.timestamp < cutoff) continue;
+    const isSuccess = s.status >= 200 && s.status < 400;
+    overall.total++;
+    overall.totalLatency += s.latency;
+    if (isSuccess) overall.success++; else overall.fail++;
+
+    if (!byModel[s.model]) {
+      byModel[s.model] = { total: 0, success: 0, fail: 0, totalLatency: 0, lastUsed: 0 };
+    }
+    byModel[s.model].total++;
+    byModel[s.model].totalLatency += s.latency;
+    if (isSuccess) byModel[s.model].success++; else byModel[s.model].fail++;
+    if (s.timestamp > byModel[s.model].lastUsed) byModel[s.model].lastUsed = s.timestamp;
+
+    if (!byProvider[s.provider]) {
+      byProvider[s.provider] = { total: 0, success: 0, fail: 0, totalLatency: 0 };
+    }
+    byProvider[s.provider].total++;
+    byProvider[s.provider].totalLatency += s.latency;
+    if (isSuccess) byProvider[s.provider].success++; else byProvider[s.provider].fail++;
+  }
+
+  function avg(obj) {
+    return obj.total > 0 ? Math.round(obj.totalLatency / obj.total) : 0;
+  }
+
+  return {
+    overall: { ...overall, avgLatency: avg(overall) },
+    byModel: Object.fromEntries(
+      Object.entries(byModel).map(([k, v]) => [k, { ...v, avgLatency: avg(v) }])
+    ),
+    byProvider: Object.fromEntries(
+      Object.entries(byProvider).map(([k, v]) => [k, { ...v, avgLatency: avg(v) }])
+    ),
+    totalEntries: requestStats.length,
+    range
+  };
+}
+
 if (isMainModule()) {
   loadEnv();
   const config = loadConfig();
@@ -129,6 +233,24 @@ export async function handleRequest(request, response, activeConfig) {
 
   if (request.method === "GET" && url.pathname === "/admin/presets") {
     sendJson(response, 200, { presets: PROVIDER_PRESETS });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/admin/stats") {
+    const range = url.searchParams.get("range") || "all";
+    sendJson(response, 200, getStats(range));
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/admin/stats/stream") {
+    response.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive"
+    });
+    response.write(`data: ${JSON.stringify({ total: requestStats.length })}\n\n`);
+    statsClients.add(response);
+    request.on("close", () => statsClients.delete(response));
     return;
   }
 
@@ -224,37 +346,54 @@ export async function handleRequest(request, response, activeConfig) {
 async function handleResponses(body, response, activeConfig) {
   const route = resolveRoute(activeConfig, body.model);
   logRoute("responses", route);
+  const startTime = Date.now();
 
-  if ((route.provider.protocol || "responses") === "responses") {
-    const upstreamBody = { ...body, model: route.upstreamModel };
-    const upstream = await callUpstream(route.provider, "/responses", upstreamBody);
-    await relayUpstream(upstream, response, route);
-    return;
+  try {
+    if ((route.provider.protocol || "responses") === "responses") {
+      const upstreamBody = { ...body, model: route.upstreamModel };
+      const upstream = await callUpstream(route.provider, "/responses", upstreamBody);
+      recordStat({ timestamp: Date.now(), model: route.publicModel, provider: route.providerId, status: upstream.status, latency: Date.now() - startTime, endpoint: "responses" });
+      await relayUpstream(upstream, response, route);
+      return;
+    }
+
+    const chatBody = responsesToChatBody(body, route.upstreamModel);
+    const upstream = await callUpstream(route.provider, "/chat/completions", chatBody);
+
+    if (body.stream) {
+      recordStat({ timestamp: Date.now(), model: route.publicModel, provider: route.providerId, status: upstream.status, latency: Date.now() - startTime, endpoint: "responses" });
+      await pipeChatStreamAsResponses(upstream, response, route.publicModel);
+      return;
+    }
+
+    const chat = await upstream.json();
+    recordStat({ timestamp: Date.now(), model: route.publicModel, provider: route.providerId, status: upstream.status, latency: Date.now() - startTime, endpoint: "responses" });
+    if (!upstream.ok) {
+      sendJson(response, upstream.status, chat);
+      return;
+    }
+
+    sendJson(response, 200, chatCompletionToResponse(chat, route.publicModel), routeHeaders(route));
+  } catch (err) {
+    recordStat({ timestamp: Date.now(), model: route.publicModel, provider: route.providerId, status: 502, latency: Date.now() - startTime, endpoint: "responses" });
+    throw err;
   }
-
-  const chatBody = responsesToChatBody(body, route.upstreamModel);
-  const upstream = await callUpstream(route.provider, "/chat/completions", chatBody);
-
-  if (body.stream) {
-    await pipeChatStreamAsResponses(upstream, response, route.publicModel);
-    return;
-  }
-
-  const chat = await upstream.json();
-  if (!upstream.ok) {
-    sendJson(response, upstream.status, chat);
-    return;
-  }
-
-  sendJson(response, 200, chatCompletionToResponse(chat, route.publicModel), routeHeaders(route));
 }
 
 async function handleChatCompletions(body, response, activeConfig) {
   const route = resolveRoute(activeConfig, body.model);
   logRoute("chat.completions", route);
-  const upstreamBody = { ...body, model: route.upstreamModel };
-  const upstream = await callUpstream(route.provider, "/chat/completions", upstreamBody);
-  await relayUpstream(upstream, response, route);
+  const startTime = Date.now();
+
+  try {
+    const upstreamBody = { ...body, model: route.upstreamModel };
+    const upstream = await callUpstream(route.provider, "/chat/completions", upstreamBody);
+    recordStat({ timestamp: Date.now(), model: route.publicModel, provider: route.providerId, status: upstream.status, latency: Date.now() - startTime, endpoint: "chat.completions" });
+    await relayUpstream(upstream, response, route);
+  } catch (err) {
+    recordStat({ timestamp: Date.now(), model: route.publicModel, provider: route.providerId, status: 502, latency: Date.now() - startTime, endpoint: "chat.completions" });
+    throw err;
+  }
 }
 
 async function callUpstream(provider, path, body) {

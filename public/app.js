@@ -8,6 +8,7 @@ const el = {
   statusText: $("#statusText"),
   themeToggle: $("#themeToggle"),
   themeIcon: $("#themeIcon"),
+  checkUpdateBtn: $("#checkUpdateBtn"),
   toast: $("#toast"),
   providerCount: $("#providerCount"),
   providerList: $("#providerList"),
@@ -49,6 +50,26 @@ el.themeToggle.addEventListener("click", () => {
   document.documentElement.setAttribute("data-theme", next);
   localStorage.setItem("theme", next);
   el.themeIcon.innerHTML = next === "dark" ? "&#9788;" : "&#9789;";
+});
+
+el.checkUpdateBtn.addEventListener("click", async () => {
+  el.checkUpdateBtn.disabled = true;
+  el.checkUpdateBtn.textContent = "检查中...";
+  try {
+    const data = await requestJson("/admin/check-update");
+    if (data.error) {
+      toast("检查失败: " + data.error, "bad");
+    } else if (data.hasUpdate) {
+      toast(`新版本可用: ${data.localVersion} → ${data.remoteVersion}，运行 git pull 更新`);
+    } else {
+      toast(`已是最新版本 (${data.localVersion})`);
+    }
+  } catch (err) {
+    toast("检查失败: " + err.message, "bad");
+  } finally {
+    el.checkUpdateBtn.disabled = false;
+    el.checkUpdateBtn.textContent = "检查更新";
+  }
 });
 
 initTheme();

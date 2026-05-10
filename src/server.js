@@ -184,7 +184,67 @@ if (isMainModule()) {
   server.listen(port, host, () => {
     const address = server.address();
     console.log(`Codex model switch proxy listening on http://${address.address}:${address.port}/v1`);
+    checkForUpdates();
   });
+}
+
+function checkForUpdates() {
+  checkForUpdatesApi().then((result) => {
+    if (result.hasUpdate) {
+      console.log(`\n  [更新] 新版本可用: ${result.localVersion} → ${result.remoteVersion}`);
+      console.log("  运行 git pull && npm start 获取最新功能\n");
+    }
+  }).catch(() => {});
+}
+
+async function getLocalVersion() {
+  try {
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8"));
+    return pkg.version || "0.0.0";
+  } catch { return "0.0.0"; }
+}
+
+async function fetchRemoteVersion() {
+  const { execSync } = await import("node:child_process");
+  let remoteUrl = "";
+  try {
+    remoteUrl = execSync("git remote get-url origin", { encoding: "utf8", timeout: 3000 }).trim();
+  } catch { return null; }
+
+  // git@github.com:owner/repo.git → owner/repo
+  // https://github.com/owner/repo.git → owner/repo
+  const match = remoteUrl.match(/github\.com[:/]([^/]+\/[^/.]+?)(?:\.git)?$/);
+  if (!match) return null;
+
+  const [, repo] = match;
+  const headers = { "Accept": "application/vnd.github.v3+json" };
+  const token = process.env.GITHUB_TOKEN;
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  // Get default branch
+  const repoResp = await fetch(`https://api.github.com/repos/${repo}`, { headers, signal: AbortSignal.timeout(5000) });
+  if (!repoResp.ok) return null;
+  const repoData = await repoResp.json();
+  const branch = repoData.default_branch || "main";
+
+  // Get package.json content
+  const fileResp = await fetch(`https://api.github.com/repos/${repo}/contents/package.json?ref=${branch}`, { headers, signal: AbortSignal.timeout(5000) });
+  if (!fileResp.ok) return null;
+  const fileData = await fileResp.json();
+  const content = Buffer.from(fileData.content, "base64").toString("utf8");
+  return JSON.parse(content);
+}
+
+async function checkForUpdatesApi() {
+  const localVersion = await getLocalVersion();
+  try {
+    const remote = await fetchRemoteVersion();
+    if (!remote || !remote.version) return { localVersion, error: "无法获取远程版本" };
+    const hasUpdate = remote.version !== localVersion;
+    return { localVersion, remoteVersion: remote.version, hasUpdate };
+  } catch {
+    return { localVersion, error: "网络连接失败" };
+  }
 }
 
 export function createProxyServer(activeConfig) {
@@ -251,6 +311,12 @@ export async function handleRequest(request, response, activeConfig) {
     response.write(`data: ${JSON.stringify({ total: requestStats.length })}\n\n`);
     statsClients.add(response);
     request.on("close", () => statsClients.delete(response));
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/admin/check-update") {
+    const result = await checkForUpdatesApi();
+    sendJson(response, 200, result);
     return;
   }
 
